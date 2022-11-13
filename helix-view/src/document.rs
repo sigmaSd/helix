@@ -1206,6 +1206,7 @@ pub struct SearchInfo {
     pub all_matches: Vec<(usize, usize)>,
     pub cursor: usize,
     pub show: bool, // default false
+    pub last_seen_regex: String,
 }
 
 #[cfg(test)]

@@ -1691,6 +1691,7 @@ fn search_and_fill_match(
         .map(|c| (c.start(), c.end()))
         .take(SEARCH_MAX_HIT)
         .collect();
+    doc.search_info.last_seen_regex = regex.to_string();
 
     let selection = doc.selection(view.id);
     let text = doc.text().slice(..);
@@ -1741,27 +1742,27 @@ fn search_next_or_prev_impl(cx: &mut Context, movement: Movement, direction: Dir
     let search_config = &config.search;
     let wrap_around = search_config.wrap_around;
 
-    // We have to redo the search since the document might have changed
-    if !doc.search_info.show {
-        let registers = &cx.editor.registers;
-        if let Some(query) = registers.read('/').and_then(|query| query.last()) {
-            let search_config = &config.search;
-            let contents = doc.text().slice(..).to_string();
-            let case_insensitive = if search_config.smart_case {
-                !query.chars().any(char::is_uppercase)
-            } else {
-                false
-            };
-            if let Ok(regex) = RegexBuilder::new(query)
-                .case_insensitive(case_insensitive)
-                .multi_line(true)
-                .build()
-            {
+    let registers = &cx.editor.registers;
+    if let Some(query) = registers.read('/').and_then(|query| query.last()) {
+        let search_config = &config.search;
+        let contents = doc.text().slice(..).to_string();
+        let case_insensitive = if search_config.smart_case {
+            !query.chars().any(char::is_uppercase)
+        } else {
+            false
+        };
+        if let Ok(regex) = RegexBuilder::new(query)
+            .case_insensitive(case_insensitive)
+            .multi_line(true)
+            .build()
+        {
+            // We have to redo the search since the document might have changed
+            if !doc.search_info.show || regex.to_string() != doc.search_info.last_seen_regex {
                 search_and_fill_match(view, doc, regex, &contents, direction, wrap_around);
-            } else {
-                //let error = format!("Invalid regex: {}", query);
-                //cx.editor.set_error(error); FIXME
             }
+        } else {
+            //let error = format!("Invalid regex: {}", query);
+            //cx.editor.set_error(error); FIXME
         }
     }
 
