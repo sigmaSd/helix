@@ -859,7 +859,7 @@ impl Document {
         }
 
         // Hide the search position from the status line
-        self.search_info.position = None;
+        self.search_info.show = false;
 
         success
     }
@@ -1203,16 +1203,9 @@ impl Display for FormatterError {
 
 #[derive(Default)]
 pub struct SearchInfo {
-    pub position: Option<SearchPosition>,
-    pub all_matches: Option<Vec<(usize, usize)>>,
-}
-pub struct SearchPosition {
-    /// The position of the current match
-    pub current_position: usize,
-    /// The total number of matches
-    pub total_positions: usize,
-    /// True if we had wrapped
-    pub wrapped: bool,
+    pub all_matches: Vec<(usize, usize)>,
+    pub cursor: usize,
+    pub show: bool, // default false
 }
 
 #[cfg(test)]

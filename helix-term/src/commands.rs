@@ -29,7 +29,7 @@ use helix_core::{
 use helix_view::{
     apply_transaction,
     clipboard::ClipboardType,
-    document::{FormatterError, Mode, SearchPosition, SCRATCH_BUFFER_NAME},
+    document::{FormatterError, Mode, SCRATCH_BUFFER_NAME},
     editor::{Action, Motion},
     info::Info,
     input::KeyEvent,
@@ -1579,107 +1579,18 @@ fn split_selection_on_newline(cx: &mut Context) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn search_impl(
-    editor: &mut Editor,
-    contents: &str,
-    regex: &Regex,
-    movement: Movement,
-    direction: Direction,
-    scrolloff: usize,
-    wrap_around: bool,
-    show_warnings: bool,
-) {
+fn search_impl(editor: &mut Editor, movement: Movement, scrolloff: usize) {
     let (view, doc) = current!(editor);
-    let text = doc.text().slice(..);
-    let selection = doc.selection(view.id);
 
-    // Get the right side of the primary block cursor for forward search, or the
-    // grapheme before the start of the selection for reverse search.
-    let start = match direction {
-        Direction::Forward => text.char_to_byte(graphemes::ensure_grapheme_boundary_next(
-            text,
-            selection.primary().to(),
-        )),
-        Direction::Backward => text.char_to_byte(graphemes::ensure_grapheme_boundary_prev(
-            text,
-            selection.primary().from(),
-        )),
-    };
+    doc.search_info.show = true;
+    let mat = doc.search_info.all_matches.get(doc.search_info.cursor);
 
-    // A regex::Match returns byte-positions in the str. In the case where we
-    // do a reverse search and wraparound to the end, we don't need to search
-    // the text before the current cursor position for matches, but by slicing
-    // it out, we need to add it back to the position of the selection.
-    let mut offset = 0;
-
-    // use find_at to find the next match after the cursor, loop around the end
-    // Careful, `Regex` uses `bytes` as offsets, not character indices!
-    let mut mat = match direction {
-        Direction::Forward => regex.find_at(contents, start),
-        Direction::Backward => regex.find_iter(&contents[..start]).last(),
-    };
-
-    let all_matches = if let Some(matches) = doc.search_info.all_matches.clone() {
-        matches
-    } else {
-        regex
-            .find_iter(contents)
-            .map(|c| (c.start(), c.end()))
-            .take(SEARCH_MAX_HIT)
-            .collect()
-    };
-
-    if let Some(ref mat) = mat {
-        let current_position = all_matches
-            .iter()
-            .position(|this_m| this_m.0 == mat.start() && this_m.1 == mat.end());
-        if let Some(current_position) = current_position {
-            doc.search_info.position = Some(SearchPosition {
-                current_position: current_position + 1,
-                total_positions: all_matches.len(),
-                wrapped: false,
-            });
-        }
-    } else if !all_matches.is_empty() && wrap_around {
-        // There are matches but no next match
-        // This means that we will wrap around
-        let current_position = match direction {
-            Direction::Forward => 1,
-            Direction::Backward => all_matches.len(),
-        };
-        doc.search_info.position = Some(SearchPosition {
-            current_position,
-            total_positions: all_matches.len(),
-            wrapped: true,
-        });
-    }
-
-    if mat.is_none() {
-        if wrap_around {
-            mat = match direction {
-                Direction::Forward => regex.find(contents),
-                Direction::Backward => {
-                    offset = start;
-                    regex.find_iter(&contents[start..]).last()
-                }
-            };
-        }
-        if show_warnings {
-            if wrap_around && mat.is_some() {
-                editor.set_status("Wrapped around document");
-            } else {
-                editor.set_error("No more matches");
-            }
-        }
-    }
-
-    let (view, doc) = current!(editor);
     let text = doc.text().slice(..);
     let selection = doc.selection(view.id);
 
     if let Some(mat) = mat {
-        let start = text.byte_to_char(mat.start() + offset);
-        let end = text.byte_to_char(mat.end() + offset);
+        let start = text.byte_to_char(mat.0);
+        let end = text.byte_to_char(mat.1);
 
         if end == 0 {
             // skip empty matches that don't make sense
@@ -1757,68 +1668,134 @@ fn searcher(cx: &mut Context, direction: Direction) {
                 return;
             }
 
-            // Find all matches in the document
-            // Then find the current match position inside all matches
-            // We then render that to the status line by setting editor.search_matches
-            let doc = doc_mut!(editor);
-            doc.search_info.all_matches = Some(
-                regex
-                    .find_iter(&contents)
-                    .map(|c| (c.start(), c.end()))
-                    .take(SEARCH_MAX_HIT)
-                    .collect(),
-            );
+            let (view, doc) = current!(editor);
+            search_and_fill_match(view, doc, regex, &contents, direction, wrap_around);
 
-            search_impl(
-                editor,
-                &contents,
-                &regex,
-                Movement::Move,
-                direction,
-                scrolloff,
-                wrap_around,
-                false,
-            );
+            search_impl(editor, Movement::Move, scrolloff);
         },
     );
+}
+
+fn search_and_fill_match(
+    view: &mut View,
+    doc: &mut Document,
+    regex: Regex,
+    contents: &str,
+    direction: Direction,
+    wrap_around: bool,
+) {
+    // Get the right side of the primary block cursor for forward search, or the
+    // grapheme before the start of the selection for reverse search.
+    doc.search_info.all_matches = regex
+        .find_iter(contents)
+        .map(|c| (c.start(), c.end()))
+        .take(SEARCH_MAX_HIT)
+        .collect();
+
+    let selection = doc.selection(view.id);
+    let text = doc.text().slice(..);
+    match direction {
+        Direction::Forward => {
+            let start = text.char_to_byte(graphemes::ensure_grapheme_boundary_next(
+                text,
+                selection.primary().to(),
+            ));
+
+            let pos = doc
+                .search_info
+                .all_matches
+                .iter()
+                .position(|m| m.0 >= start);
+            if let Some(pos) = pos {
+                doc.search_info.cursor = pos;
+            } else if wrap_around {
+                doc.search_info.cursor = 0;
+            }
+        }
+        Direction::Backward => {
+            let start = text.char_to_byte(graphemes::ensure_grapheme_boundary_prev(
+                text,
+                selection.primary().from(),
+            ));
+            let pos = doc
+                .search_info
+                .all_matches
+                .iter()
+                .rev()
+                .position(|m| m.0 < start);
+            //dbg!(&start, &pos, &doc.search_info.all_matches);
+            if let Some(pos) = pos {
+                doc.search_info.cursor = (doc.search_info.all_matches.len() - pos) - 1;
+            } else if wrap_around {
+                doc.search_info.cursor = doc.search_info.all_matches.len().saturating_sub(1);
+            }
+        }
+    };
 }
 
 fn search_next_or_prev_impl(cx: &mut Context, movement: Movement, direction: Direction) {
     let count = cx.count();
     let config = cx.editor.config();
     let scrolloff = config.scrolloff;
-    let (_, doc) = current!(cx.editor);
-    let registers = &cx.editor.registers;
-    if let Some(query) = registers.read('/').and_then(|query| query.last()) {
-        let contents = doc.text().slice(..).to_string();
-        let search_config = &config.search;
-        let case_insensitive = if search_config.smart_case {
-            !query.chars().any(char::is_uppercase)
-        } else {
-            false
-        };
-        let wrap_around = search_config.wrap_around;
-        if let Ok(regex) = RegexBuilder::new(query)
-            .case_insensitive(case_insensitive)
-            .multi_line(true)
-            .build()
-        {
-            for _ in 0..count {
-                search_impl(
-                    cx.editor,
-                    &contents,
-                    &regex,
-                    movement,
-                    direction,
-                    scrolloff,
-                    wrap_around,
-                    true,
-                );
+    let (view, doc) = current!(cx.editor);
+    let search_config = &config.search;
+    let wrap_around = search_config.wrap_around;
+
+    // We have to redo the search since the document might have changed
+    if !doc.search_info.show {
+        let registers = &cx.editor.registers;
+        if let Some(query) = registers.read('/').and_then(|query| query.last()) {
+            let search_config = &config.search;
+            let contents = doc.text().slice(..).to_string();
+            let case_insensitive = if search_config.smart_case {
+                !query.chars().any(char::is_uppercase)
+            } else {
+                false
+            };
+            if let Ok(regex) = RegexBuilder::new(query)
+                .case_insensitive(case_insensitive)
+                .multi_line(true)
+                .build()
+            {
+                search_and_fill_match(view, doc, regex, &contents, direction, wrap_around);
+            } else {
+                //let error = format!("Invalid regex: {}", query);
+                //cx.editor.set_error(error); FIXME
             }
-        } else {
-            let error = format!("Invalid regex: {}", query);
-            cx.editor.set_error(error);
         }
+    }
+
+    let hit = !doc.search_info.all_matches.is_empty();
+    let mut will_wrap_around = false;
+    if hit {
+        match direction {
+            Direction::Forward => {
+                if !wrap_around && doc.search_info.cursor + 1 == doc.search_info.all_matches.len() {
+                } else {
+                    doc.search_info.cursor =
+                        (1 + doc.search_info.cursor) % doc.search_info.all_matches.len();
+                    if doc.search_info.cursor == 0 {
+                        will_wrap_around = true
+                    }
+                }
+            }
+            Direction::Backward => {
+                if wrap_around && doc.search_info.cursor == 0 {
+                    will_wrap_around = true;
+                }
+                doc.search_info.cursor = if wrap_around && doc.search_info.cursor == 0 {
+                    doc.search_info.all_matches.len() - 1
+                } else {
+                    doc.search_info.cursor - 1
+                };
+            }
+        }
+    }
+    if will_wrap_around {
+        cx.editor.set_status("Wrapped around document");
+    }
+    for _ in 0..count {
+        search_impl(cx.editor, movement, scrolloff);
     }
 }
 

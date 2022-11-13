@@ -247,18 +247,13 @@ fn render_search_position<F>(context: &mut RenderContext, write: F)
 where
     F: Fn(&mut RenderContext, String, Option<Style>) + Copy,
 {
-    if let Some(search_position) = &context.doc.search_info.position {
-        let wrapped_indicator_else_space = if search_position.wrapped { " W " } else { " " };
-        write(
-            context,
-            format!(
-                "{}[{}/{}] ",
-                wrapped_indicator_else_space,
-                search_position.current_position,
-                search_position.total_positions
-            ),
-            None,
-        );
+    let cursor = context.doc.search_info.cursor + 1;
+    let items_num = context.doc.search_info.all_matches.len();
+    if items_num == 0 {
+        return;
+    }
+    if context.doc.search_info.show {
+        write(context, format!(" [{}/{}] ", cursor, items_num), None);
     }
 }
 
