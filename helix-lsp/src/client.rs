@@ -1165,6 +1165,11 @@ impl Client {
         self.call::<T>(params)
     }
 
+    pub fn denolsp_get_virtual_text(&self, uri: lsp::Url) -> impl Future<Output = Result<Value>> {
+        self.call::<DenoVirtualTextDocument>(DenoVirtualTextDocumentParams {
+            text_document: lsp::TextDocumentIdentifier { uri },
+        })
+    }
     pub fn goto_definition(
         &self,
         text_document: lsp::TextDocumentIdentifier,
@@ -1428,4 +1433,22 @@ impl Client {
 
         Some(self.call::<lsp::request::ExecuteCommand>(params))
     }
+}
+
+struct DenoVirtualTextDocument;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DenoVirtualTextDocumentParams {
+    #[serde(rename = "textDocument")]
+    text_document: lsp::TextDocumentIdentifier,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DenoVirtualTextDocumentResult {
+    result: String,
+}
+
+impl lsp::request::Request for DenoVirtualTextDocument {
+    type Params = DenoVirtualTextDocumentParams;
+    type Result = String;
+    const METHOD: &'static str = "deno/virtualTextDocument";
 }

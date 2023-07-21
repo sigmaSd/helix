@@ -6,7 +6,7 @@ use helix_lsp::{
         NumberOrString,
     },
     util::{diagnostic_to_lsp_diagnostic, lsp_range_to_range, range_to_lsp_range},
-    Client, OffsetEncoding,
+    Client, OffsetEncoding, Url,
 };
 use serde_json::Value;
 use tokio_stream::StreamExt;
@@ -18,7 +18,7 @@ use tui::{
 use super::{align_view, push_jump, Align, Context, Editor, Open};
 
 use helix_core::{
-    path, syntax::LanguageServerFeature, text_annotations::InlineAnnotation, Selection,
+    path, syntax::LanguageServerFeature, text_annotations::InlineAnnotation, Selection, Transaction,
 };
 use helix_view::{
     document::{DocumentInlayHints, DocumentInlayHintsId, Mode},
@@ -202,6 +202,32 @@ fn jump_to_location(
     offset_encoding: OffsetEncoding,
     action: Action,
 ) {
+    if location.uri.to_string().contains("deno:/") {
+        let uri = Url::parse(&format!(
+            "deno:/{}",
+            location.uri.to_string().split_once("deno:/").unwrap().1
+        ))
+        .unwrap();
+        editor
+            .open(std::path::Path::new(&uri.to_string()), action)
+            .unwrap();
+        let (view, doc) = current!(editor);
+        push_jump(view, doc);
+        let denolsp = doc.language_servers().next().unwrap();
+        let response: Option<String> =
+            serde_json::from_value(block_on(denolsp.denolsp_get_virtual_text(uri)).unwrap())
+                .unwrap();
+
+        if let Some(response) = response {
+            let t = Transaction::change(
+                doc.text(),
+                vec![(0, doc.text().len_chars(), Some(response.into()))].into_iter(),
+            );
+            doc.apply(&t, view.id);
+        }
+        return;
+    }
+
     let (view, doc) = current!(editor);
     push_jump(view, doc);
 
