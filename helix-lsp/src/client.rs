@@ -1442,13 +1442,9 @@ struct DenoVirtualTextDocumentParams {
     #[serde(rename = "textDocument")]
     text_document: lsp::TextDocumentIdentifier,
 }
-#[derive(serde::Serialize, serde::Deserialize)]
-struct DenoVirtualTextDocumentResult {
-    result: String,
-}
 
 impl lsp::request::Request for DenoVirtualTextDocument {
     type Params = DenoVirtualTextDocumentParams;
-    type Result = String;
+    type Result = Option<String>;
     const METHOD: &'static str = "deno/virtualTextDocument";
 }
